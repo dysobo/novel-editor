@@ -193,7 +193,9 @@ class AIDialog(QWidget):
         self._accumulated = ""
 
         if task_type == "continue":
-            gen = self.ai_tasks.continue_writing(content, chapter_id)
+            # 主线程构建消息，子线程只做 AI 调用
+            msgs = self.ai_tasks.build_continue_messages(content, chapter_id)
+            gen = self.ai_tasks.continue_writing_stream(msgs)
             self._run_stream(gen)
         elif task_type == "polish":
             gen = self.ai_tasks.polish(content)
@@ -201,9 +203,10 @@ class AIDialog(QWidget):
         elif task_type == "summary":
             ch = self.project.db.get_chapter(chapter_id)
             title = ch["title"] if ch else "未知"
+            self._summary_chapter_id = chapter_id
             self.output.setPlainText("正在生成摘要...")
             worker = BlockingAIWorker(
-                self.ai_tasks.generate_summary, args=(content, title, chapter_id)
+                self.ai_tasks.generate_summary_call, args=(content, title)
             )
             worker.result_ready.connect(self._on_summary_done)
             worker.error_signal.connect(self._on_error)
@@ -232,19 +235,18 @@ class AIDialog(QWidget):
         self.btn_stop.setEnabled(False)
         self.output.append(f"\n\n[错误] {msg}")
 
-    def _on_summary_done(self, result):
+    def _on_summary_done(self, result_text):
         self.btn_stop.setEnabled(False)
-        if isinstance(result, dict):
-            text = f"摘要: {result.get('summary', '')}\n"
-            text += f"关键事件: {', '.join(result.get('key_events', []))}\n"
-            changes = result.get('character_changes', {})
-            if changes:
-                text += "角色变化:\n"
-                for name, change in changes.items():
-                    text += f"  {name}: {change}\n"
-            self.output.setPlainText(text)
-        else:
-            self.output.setPlainText(str(result))
+        # 在主线程中保存到数据库
+        data = self.ai_tasks.save_summary_result(result_text, self._summary_chapter_id)
+        text = f"摘要: {data.get('summary', '')}\n"
+        text += f"关键事件: {', '.join(data.get('key_events', []))}\n"
+        changes = data.get('character_changes', {})
+        if changes:
+            text += "角色变化:\n"
+            for name, change in changes.items():
+                text += f"  {name}: {change}\n"
+        self.output.setPlainText(text)
 
     def _stop_ai(self):
         if self._worker:
@@ -308,8 +310,11 @@ class AIDialog(QWidget):
         self.btn_outline.setEnabled(False)
         self.btn_write_ch1.setEnabled(False)
 
+        # 在主线程中预先读取数据库数据
+        extra = self.ai_tasks.build_outline_context()
+
         worker = BlockingAIWorker(
-            self.ai_tasks.generate_full_outline, args=(title, genre, idea)
+            self.ai_tasks.generate_full_outline, args=(title, genre, idea, extra)
         )
         worker.result_ready.connect(lambda text: self._on_outline_ready(text, title))
         worker.error_signal.connect(self._on_error)
@@ -417,6 +422,8 @@ class AIDialog(QWidget):
         self._accumulated = ""
         self.output.setPlainText(f"正在撰写「{title}」...")
 
-        gen = self.ai_tasks.write_chapter(title, outline_text, first_chapter["id"])
+        # 主线程构建消息，子线程只做 AI 调用
+        msgs = self.ai_tasks.build_write_chapter_messages(title, outline_text, first_chapter["id"])
+        gen = self.ai_tasks.write_chapter_stream(msgs)
         self._current_chapter_id = first_chapter["id"]
         self._run_stream(gen)
