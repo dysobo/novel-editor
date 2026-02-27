@@ -89,7 +89,7 @@ class AIDialog(QWidget):
         self.btn_outline.clicked.connect(self._generate_outline)
         quick_row.addWidget(self.btn_outline)
 
-        self.btn_write_ch1 = QPushButton("写下一章")
+        self.btn_write_ch1 = QPushButton("写章节")
         self.btn_write_ch1.clicked.connect(self._write_next_chapter)
         quick_row.addWidget(self.btn_write_ch1)
         vbox.addLayout(quick_row)
@@ -401,7 +401,7 @@ class AIDialog(QWidget):
                 return
             widget = widget.parent() if hasattr(widget, 'parent') else None
 
-    # ── 写下一章 ──
+    # ── 写章节 ──
     def _write_next_chapter(self):
         if not self.project:
             QMessageBox.information(self, "提示", "请先新建或打开项目")
@@ -414,32 +414,57 @@ class AIDialog(QWidget):
             return
 
         db = self.project.db
-        # 按顺序遍历所有卷→章，找到第一个没有内容的章节
         volumes = db.get_chapters(parent_id=None)
         if not volumes:
             QMessageBox.warning(self, "提示", "请先生成大纲（需要有卷和章节）")
             return
 
-        target_chapter = None
+        # 构建章节列表供选择
+        chapter_list = []  # [(display_text, chapter_id, has_content)]
+        first_empty_idx = -1
         for vol in volumes:
             children = db.get_chapters(parent_id=vol["id"])
             for ch in children:
-                content = (ch["content"] or "").strip()
-                # 去掉 HTML 标签后判断是否为空
-                import re as _re
-                plain = _re.sub(r'<[^>]+>', '', content).strip()
-                if not plain:
-                    target_chapter = ch
-                    break
-            if target_chapter:
-                break
+                plain = re.sub(r'<[^>]+>', '', (ch["content"] or "")).strip()
+                has_content = bool(plain)
+                mark = "✓" if has_content else "○"
+                display = f"{mark}  {vol['title']} / {ch['title']}"
+                chapter_list.append((display, ch["id"], has_content))
+                if first_empty_idx < 0 and not has_content:
+                    first_empty_idx = len(chapter_list) - 1
 
-        if not target_chapter:
-            QMessageBox.information(self, "提示", "所有章节都已有内容，没有需要写的章节了。")
+        if not chapter_list:
+            QMessageBox.warning(self, "提示", "未找到章节，请先生成大纲")
             return
 
-        title = target_chapter["title"]
-        # 获取大纲内容
+        # 弹出选择对话框
+        items = [c[0] for c in chapter_list]
+        default_idx = first_empty_idx if first_empty_idx >= 0 else 0
+        chosen, ok = QInputDialog.getItem(
+            self, "选择章节", "选择要生成的章节（✓ 已有内容，○ 待生成）：",
+            items, default_idx, False,
+        )
+        if not ok:
+            return
+
+        idx = items.index(chosen)
+        chapter_id = chapter_list[idx][1]
+        target = db.get_chapter(chapter_id)
+
+        if chapter_list[idx][2]:
+            ret = QMessageBox.question(
+                self, "确认", f"「{target['title']}」已有内容，重新生成将覆盖。继续？"
+            )
+            if ret != QMessageBox.Yes:
+                return
+
+        self._start_write_chapter(target)
+
+    def _start_write_chapter(self, chapter):
+        """根据大纲生成指定章节内容"""
+        db = self.project.db
+        title = chapter["title"]
+
         outlines = db.get_outlines(parent_id=None)
         outline_text = ""
         for o in outlines:
@@ -449,8 +474,7 @@ class AIDialog(QWidget):
         self._accumulated = ""
         self.output.setPlainText(f"正在撰写「{title}」...")
 
-        # 主线程构建消息，子线程只做 AI 调用
-        msgs = self.ai_tasks.build_write_chapter_messages(title, outline_text, target_chapter["id"])
+        msgs = self.ai_tasks.build_write_chapter_messages(title, outline_text, chapter["id"])
         gen = self.ai_tasks.write_chapter_stream(msgs)
-        self._writing_chapter_id = target_chapter["id"]
+        self._writing_chapter_id = chapter["id"]
         self._run_stream(gen)
