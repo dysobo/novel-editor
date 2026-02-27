@@ -89,8 +89,8 @@ class AIDialog(QWidget):
         self.btn_outline.clicked.connect(self._generate_outline)
         quick_row.addWidget(self.btn_outline)
 
-        self.btn_write_ch1 = QPushButton("写第一章")
-        self.btn_write_ch1.clicked.connect(self._write_first_chapter)
+        self.btn_write_ch1 = QPushButton("写下一章")
+        self.btn_write_ch1.clicked.connect(self._write_next_chapter)
         quick_row.addWidget(self.btn_write_ch1)
         vbox.addLayout(quick_row)
 
@@ -230,6 +230,18 @@ class AIDialog(QWidget):
 
     def _on_finished(self):
         self.btn_stop.setEnabled(False)
+        # 如果是写章节任务，自动保存内容到数据库
+        if hasattr(self, '_writing_chapter_id') and self._writing_chapter_id and self._accumulated.strip():
+            self.project.db.update_chapter(
+                self._writing_chapter_id,
+                content=self._accumulated.strip(),
+                word_count=len(self._accumulated.replace(" ", "").replace("\n", "")),
+            )
+            title = self.project.db.get_chapter(self._writing_chapter_id)
+            ch_title = title["title"] if title else ""
+            self.output.append(f"\n\n--- 已自动保存到「{ch_title}」---")
+            self._writing_chapter_id = None
+            self._refresh_chapter_tree()
 
     def _on_error(self, msg):
         self.btn_stop.setEnabled(False)
@@ -336,53 +348,61 @@ class AIDialog(QWidget):
     def _parse_outline_to_chapters(self, text, novel_title):
         """解析 AI 生成的大纲，创建卷和章节到数据库"""
         db = self.project.db
-        volume_pattern = re.compile(r'^##\s+(.+)', re.MULTILINE)
-        chapter_pattern = re.compile(r'^###\s+(.+)', re.MULTILINE)
-
         lines = text.split('\n')
         current_volume_id = None
+        current_outline_vol_id = None
         chapter_count = 0
-
+        # 先解析出结构：标题行 + 后续概要文本
+        entries = []  # [(type, title, summary_lines)]
         for line in lines:
-            line_stripped = line.strip()
-            vol_match = re.match(r'^##\s+(.+)', line_stripped)
-            ch_match = re.match(r'^###\s+(.+)', line_stripped)
+            s = line.strip()
+            vol_m = re.match(r'^##\s+(.+)', s)
+            ch_m = re.match(r'^###\s+(.+)', s)
+            if vol_m:
+                entries.append(("vol", vol_m.group(1).strip(), []))
+            elif ch_m:
+                entries.append(("ch", ch_m.group(1).strip(), []))
+            elif entries and s:
+                entries[-1][2].append(s)
 
-            if vol_match:
-                vol_title = vol_match.group(1).strip()
-                current_volume_id = db.add_chapter(title=vol_title, parent_id=None)
-                # 同时写入大纲表
-                db.add_outline(title=vol_title, level="volume", parent_id=None)
-            elif ch_match and current_volume_id is not None:
-                ch_title = ch_match.group(1).strip()
+        for etype, title, summary_lines in entries:
+            summary = "\n".join(summary_lines).strip()
+            if etype == "vol":
+                current_volume_id = db.add_chapter(title=title, parent_id=None)
+                current_outline_vol_id = db.add_outline(
+                    title=title, level="volume", parent_id=None, content=summary
+                )
+            elif etype == "ch" and current_volume_id is not None:
                 chapter_count += 1
-                ch_id = db.add_chapter(title=ch_title, parent_id=current_volume_id)
-                # 收集该章概要（下一行到下一个标题之间的文本）
-                # 简单处理：章节概要存入大纲表
-                db.add_outline(title=ch_title, level="chapter", content="")
+                db.add_chapter(title=title, parent_id=current_volume_id)
+                db.add_outline(
+                    title=title, level="chapter",
+                    parent_id=current_outline_vol_id, content=summary
+                )
 
         if chapter_count > 0:
             QMessageBox.information(
                 self, "完成",
                 f"大纲已生成并导入！共创建 {chapter_count} 个章节。\n"
-                "请在左侧章节树中查看。"
+                "请在左侧章节树和大纲面板中查看。"
             )
-            # 刷新章节树
             self._refresh_chapter_tree()
         else:
             QMessageBox.warning(self, "提示", "未能从大纲中解析出章节，请检查 AI 输出格式。")
 
     def _refresh_chapter_tree(self):
-        """向上查找主窗口并刷新章节树"""
+        """向上查找主窗口并刷新章节树和大纲面板"""
         widget = self.parent()
         while widget:
             if hasattr(widget, 'chapter_tree'):
                 widget.chapter_tree.reload()
+                if hasattr(widget, 'outline_panel'):
+                    widget.outline_panel.reload()
                 return
             widget = widget.parent() if hasattr(widget, 'parent') else None
 
-    # ── 写第一章 ──
-    def _write_first_chapter(self):
+    # ── 写下一章 ──
+    def _write_next_chapter(self):
         if not self.project:
             QMessageBox.information(self, "提示", "请先新建或打开项目")
             return
@@ -394,24 +414,31 @@ class AIDialog(QWidget):
             return
 
         db = self.project.db
-        # 找到第一个卷下的第一个章节
+        # 按顺序遍历所有卷→章，找到第一个没有内容的章节
         volumes = db.get_chapters(parent_id=None)
         if not volumes:
             QMessageBox.warning(self, "提示", "请先生成大纲（需要有卷和章节）")
             return
 
-        first_chapter = None
+        target_chapter = None
         for vol in volumes:
             children = db.get_chapters(parent_id=vol["id"])
-            if children:
-                first_chapter = children[0]
+            for ch in children:
+                content = (ch["content"] or "").strip()
+                # 去掉 HTML 标签后判断是否为空
+                import re as _re
+                plain = _re.sub(r'<[^>]+>', '', content).strip()
+                if not plain:
+                    target_chapter = ch
+                    break
+            if target_chapter:
                 break
 
-        if not first_chapter:
-            QMessageBox.warning(self, "提示", "未找到章节，请先生成大纲")
+        if not target_chapter:
+            QMessageBox.information(self, "提示", "所有章节都已有内容，没有需要写的章节了。")
             return
 
-        title = first_chapter["title"]
+        title = target_chapter["title"]
         # 获取大纲内容
         outlines = db.get_outlines(parent_id=None)
         outline_text = ""
@@ -423,7 +450,7 @@ class AIDialog(QWidget):
         self.output.setPlainText(f"正在撰写「{title}」...")
 
         # 主线程构建消息，子线程只做 AI 调用
-        msgs = self.ai_tasks.build_write_chapter_messages(title, outline_text, first_chapter["id"])
+        msgs = self.ai_tasks.build_write_chapter_messages(title, outline_text, target_chapter["id"])
         gen = self.ai_tasks.write_chapter_stream(msgs)
-        self._current_chapter_id = first_chapter["id"]
+        self._writing_chapter_id = target_chapter["id"]
         self._run_stream(gen)
