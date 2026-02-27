@@ -47,7 +47,7 @@ class ChapterTree(QWidget):
         self.tree.clear()
         if not self.project:
             return
-        self._load_children(0, self.tree.invisibleRootItem())
+        self._load_children(None, self.tree.invisibleRootItem())
         self.tree.expandAll()
 
     def _load_children(self, parent_id, parent_item):
@@ -66,7 +66,7 @@ class ChapterTree(QWidget):
                 self.chapter_selected.emit(chapter_id)
 
     def _on_rows_moved(self):
-        self._save_sort_order(self.tree.invisibleRootItem(), 0)
+        self._save_sort_order(self.tree.invisibleRootItem(), None)
 
     def _save_sort_order(self, parent_item, parent_id):
         if not self.project:
@@ -84,14 +84,14 @@ class ChapterTree(QWidget):
             return
         name, ok = QInputDialog.getText(self, "新建卷", "卷名:")
         if ok and name:
-            max_order = len(self.project.db.get_chapters(0))
-            self.project.db.add_chapter(name, parent_id=0, sort_order=max_order)
+            max_order = len(self.project.db.get_chapters(None))
+            self.project.db.add_chapter(name, parent_id=None, sort_order=max_order)
             self.reload()
 
     def _add_chapter(self):
         if not self.project:
             return
-        parent_id = 0
+        parent_id = None
         current = self.tree.currentItem()
         if current:
             pid = current.data(0, Qt.UserRole)

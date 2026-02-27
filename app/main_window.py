@@ -55,6 +55,7 @@ class MainWindow(QMainWindow):
         # 信号连接
         self.chapter_tree.chapter_selected.connect(self._on_chapter_selected)
         self.editor.content_changed.connect(self._on_content_changed)
+        self.ai_dialog.insert_requested.connect(self._on_ai_insert)
 
     def _init_menu(self):
         mb = self.menuBar()
@@ -200,6 +201,9 @@ class MainWindow(QMainWindow):
         self.right_stack.setCurrentIndex(3)
         self.ai_dialog.start_task("summary", self.editor.get_plain_text(),
                                    chapter_id=self._current_chapter_id)
+
+    def _on_ai_insert(self, text):
+        self.editor.insert_text(text)
 
     def _ai_settings(self):
         self.right_stack.setCurrentIndex(3)

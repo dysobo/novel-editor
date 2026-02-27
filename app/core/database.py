@@ -17,7 +17,7 @@ class Database:
         self._conn.executescript("""
             CREATE TABLE IF NOT EXISTS chapters (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                parent_id INTEGER DEFAULT 0,
+                parent_id INTEGER DEFAULT NULL,
                 title TEXT NOT NULL DEFAULT '未命名章节',
                 content TEXT DEFAULT '',
                 sort_order INTEGER DEFAULT 0,
@@ -49,7 +49,7 @@ class Database:
 
             CREATE TABLE IF NOT EXISTS outlines (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                parent_id INTEGER DEFAULT 0,
+                parent_id INTEGER DEFAULT NULL,
                 level TEXT DEFAULT 'chapter',
                 title TEXT NOT NULL DEFAULT '',
                 content TEXT DEFAULT '',
@@ -74,7 +74,7 @@ class Database:
         self._conn.close()
 
     # ── 章节 CRUD ──
-    def add_chapter(self, title="未命名章节", parent_id=0, sort_order=0):
+    def add_chapter(self, title="未命名章节", parent_id=None, sort_order=0):
         cur = self._conn.execute(
             "INSERT INTO chapters (title, parent_id, sort_order) VALUES (?, ?, ?)",
             (title, parent_id, sort_order),
@@ -82,7 +82,11 @@ class Database:
         self._conn.commit()
         return cur.lastrowid
 
-    def get_chapters(self, parent_id=0):
+    def get_chapters(self, parent_id=None):
+        if parent_id is None:
+            return self._conn.execute(
+                "SELECT * FROM chapters WHERE parent_id IS NULL ORDER BY sort_order"
+            ).fetchall()
         return self._conn.execute(
             "SELECT * FROM chapters WHERE parent_id=? ORDER BY sort_order",
             (parent_id,),
@@ -183,7 +187,7 @@ class Database:
         self._conn.commit()
 
     # ── 大纲 CRUD ──
-    def add_outline(self, title, level="chapter", parent_id=0, content=""):
+    def add_outline(self, title, level="chapter", parent_id=None, content=""):
         cur = self._conn.execute(
             "INSERT INTO outlines (title, level, parent_id, content) VALUES (?, ?, ?, ?)",
             (title, level, parent_id, content),
@@ -191,7 +195,11 @@ class Database:
         self._conn.commit()
         return cur.lastrowid
 
-    def get_outlines(self, parent_id=0):
+    def get_outlines(self, parent_id=None):
+        if parent_id is None:
+            return self._conn.execute(
+                "SELECT * FROM outlines WHERE parent_id IS NULL ORDER BY sort_order"
+            ).fetchall()
         return self._conn.execute(
             "SELECT * FROM outlines WHERE parent_id=? ORDER BY sort_order",
             (parent_id,),

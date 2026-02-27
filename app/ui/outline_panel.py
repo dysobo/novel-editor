@@ -73,7 +73,7 @@ class OutlinePanel(QWidget):
         self.content_edit.clear()
         if not self.project:
             return
-        self._load_children(0, self.outline_tree.invisibleRootItem())
+        self._load_children(None, self.outline_tree.invisibleRootItem())
         self.outline_tree.expandAll()
 
     def _load_children(self, parent_id, parent_item):
@@ -112,10 +112,10 @@ class OutlinePanel(QWidget):
         level = level_map.get(self.level_combo.currentText(), "chapter")
         title, ok = QInputDialog.getText(self, "新建大纲", "大纲标题:")
         if ok and title:
-            parent_id = 0
+            parent_id = None
             current = self.outline_tree.currentItem()
             if current:
-                parent_id = current.data(0, Qt.UserRole) or 0
+                parent_id = current.data(0, Qt.UserRole) or None
             self.project.db.add_outline(title, level=level, parent_id=parent_id)
             self.reload()
 

@@ -4,6 +4,7 @@ from app.ai.memory import MemoryManager
 from app.ai.prompts import (
     SYSTEM_BASE, CONTINUE_PROMPT, POLISH_PROMPT,
     SUMMARY_PROMPT, OUTLINE_PROMPT,
+    GENERATE_OUTLINE_PROMPT, WRITE_CHAPTER_PROMPT,
 )
 from app.core.database import Database
 
@@ -62,3 +63,33 @@ class AITasks:
             {"role": "user", "content": OUTLINE_PROMPT.format(context=context_info)},
         ]
         return self.client.chat_stream(messages)
+
+    def generate_full_outline(self, title: str, genre: str, idea: str):
+        """根据设定生成完整大纲 - 返回文本"""
+        extra = ""
+        characters = self.db.get_characters()
+        if characters:
+            lines = [f"- {c['name']}: {c['description'] or '无描述'}" for c in characters]
+            extra += "已有角色：\n" + "\n".join(lines) + "\n\n"
+        settings = self.db.get_world_settings()
+        if settings:
+            lines = [f"- {s['title']}: {s['content'][:80]}" for s in settings]
+            extra += "世界观设定：\n" + "\n".join(lines) + "\n\n"
+        messages = [
+            {"role": "system", "content": SYSTEM_BASE},
+            {"role": "user", "content": GENERATE_OUTLINE_PROMPT.format(
+                title=title, genre=genre, idea=idea, extra_context=extra
+            )},
+        ]
+        return self.client.chat(messages, max_tokens=4000)
+
+    def write_chapter(self, title: str, outline: str, chapter_id: int = None):
+        """根据大纲写一章内容 - 流式输出"""
+        context_msgs = self.memory.build_context(chapter_id)
+        messages = [{"role": "system", "content": SYSTEM_BASE}]
+        messages.extend(context_msgs)
+        messages.append({
+            "role": "user",
+            "content": WRITE_CHAPTER_PROMPT.format(title=title, outline=outline),
+        })
+        return self.client.chat_stream(messages, max_tokens=4000)

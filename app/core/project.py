@@ -17,7 +17,7 @@ class Project:
         db = Database(path)
         project = cls(path, db)
         # 创建默认卷和章节
-        vol_id = db.add_chapter("第一卷", parent_id=0, sort_order=0)
+        vol_id = db.add_chapter("第一卷", parent_id=None, sort_order=0)
         db.add_chapter("第一章", parent_id=vol_id, sort_order=0)
         return project
 

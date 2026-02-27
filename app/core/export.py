@@ -5,7 +5,7 @@ from app.core.database import Database
 def _get_all_chapters_ordered(db: Database) -> list:
     """递归获取所有章节，按树形顺序展平"""
     result = []
-    _flatten(db, 0, result, 0)
+    _flatten(db, None, result, 0)
     return result
 
 

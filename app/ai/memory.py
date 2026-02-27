@@ -50,7 +50,7 @@ class MemoryManager:
             parts.append("【世界观】\n" + "\n".join(ws_lines))
 
         # 总大纲
-        outlines = self.db.get_outlines(0)
+        outlines = self.db.get_outlines(None)
         if outlines:
             ol_lines = []
             for o in outlines:
@@ -115,7 +115,7 @@ class MemoryManager:
     def _get_all_chapters_flat(self) -> list:
         """递归获取所有章节，按树形顺序展平"""
         result = []
-        self._flatten(0, result)
+        self._flatten(None, result)
         return result
 
     def _flatten(self, parent_id, result):
