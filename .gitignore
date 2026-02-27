@@ -8,3 +8,5 @@ build/
 *.novel
 .env
 *.db
+setup.md
+小说test/
