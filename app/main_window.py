@@ -107,11 +107,9 @@ class MainWindow(QMainWindow):
         help_menu.addAction(self._action("项目主页", "", self._open_homepage))
         help_menu.addAction(self._action("检查更新", "", self._check_update))
 
-        # 右上角版本号
+        # 右上角版本号（显示在标题栏）
         version = QApplication.instance().applicationVersion()
-        ver_label = QLabel(f"v{version}  ")
-        ver_label.setStyleSheet("color: gray; padding-right: 8px;")
-        mb.setCornerWidget(ver_label, Qt.TopRightCorner)
+        self.setWindowTitle(f"小说编辑器  v{version}")
 
     def _action(self, text, shortcut, callback):
         act = QAction(text, self)
@@ -187,7 +185,8 @@ class MainWindow(QMainWindow):
             self._reload_project()
 
     def _reload_project(self):
-        self.setWindowTitle(f"小说编辑器 - {self.project.name}")
+        version = QApplication.instance().applicationVersion()
+        self.setWindowTitle(f"小说编辑器 v{version} - {self.project.name}")
         self.chapter_tree.set_project(self.project)
         self.character_panel.set_project(self.project)
         self.outline_panel.set_project(self.project)
