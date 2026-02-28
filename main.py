@@ -11,6 +11,7 @@ from app.main_window import MainWindow
 def main():
     app = QApplication(sys.argv)
     app.setApplicationName("小说编辑器")
+    app.setApplicationVersion("1.2")
 
     # 加载主题
     style_path = os.path.join(os.path.dirname(__file__), "resources", "styles", "theme.qss")

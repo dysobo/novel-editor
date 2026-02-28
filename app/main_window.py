@@ -1,9 +1,9 @@
 from PySide6.QtWidgets import (
     QMainWindow, QSplitter, QStackedWidget, QToolBar,
-    QStatusBar, QMessageBox, QFileDialog, QLabel,
+    QStatusBar, QMessageBox, QFileDialog, QLabel, QApplication,
 )
-from PySide6.QtCore import Qt, QTimer
-from PySide6.QtGui import QAction, QKeySequence
+from PySide6.QtCore import Qt, QTimer, QUrl, QThread, Signal
+from PySide6.QtGui import QAction, QKeySequence, QDesktopServices
 
 from app.ui.chapter_tree import ChapterTree
 from app.ui.editor import Editor
@@ -11,6 +11,22 @@ from app.ui.character_panel import CharacterPanel
 from app.ui.outline_panel import OutlinePanel
 from app.ui.world_panel import WorldPanel
 from app.ui.ai_dialog import AIDialog
+
+
+class _UpdateChecker(QThread):
+    result_ready = Signal(str, str)  # (latest_version, error)
+
+    def run(self):
+        import urllib.request, json
+        try:
+            req = urllib.request.Request(
+                "https://api.github.com/repos/dysobo/novel-editor/releases/latest",
+                headers={"User-Agent": "novel-editor"})
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                tag = json.loads(resp.read().decode())["tag_name"].lstrip("v")
+            self.result_ready.emit(tag, "")
+        except Exception:
+            self.result_ready.emit("", "timeout")
 
 
 class MainWindow(QMainWindow):
@@ -84,6 +100,18 @@ class MainWindow(QMainWindow):
         ai_menu.addAction(self._action("生成摘要", "", self._ai_summary))
         ai_menu.addSeparator()
         ai_menu.addAction(self._action("AI 设置", "", self._ai_settings))
+
+        # 关于菜单
+        help_menu = mb.addMenu("关于(&H)")
+        help_menu.addAction(self._action("使用说明", "", self._show_usage_guide))
+        help_menu.addAction(self._action("项目主页", "", self._open_homepage))
+        help_menu.addAction(self._action("检查更新", "", self._check_update))
+
+        # 右上角版本号
+        version = QApplication.instance().applicationVersion()
+        ver_label = QLabel(f"v{version}  ")
+        ver_label.setStyleSheet("color: gray; padding-right: 8px;")
+        mb.setCornerWidget(ver_label, Qt.TopRightCorner)
 
     def _action(self, text, shortcut, callback):
         act = QAction(text, self)
@@ -210,6 +238,34 @@ class MainWindow(QMainWindow):
     def _ai_settings(self):
         self.right_stack.setCurrentIndex(3)
         self.ai_dialog.show_settings()
+
+    def _show_usage_guide(self):
+        QMessageBox.information(self, "使用说明",
+            "1. 在 AI 设置中配置 API 密钥\n"
+            "2. 新建或打开项目\n"
+            "3. 编写角色设定和世界观\n"
+            "4. 生成或编写大纲\n"
+            "5. 逐章撰写，可使用 AI 续写/润色辅助")
+
+    def _open_homepage(self):
+        QDesktopServices.openUrl(QUrl("https://github.com/dysobo/novel-editor"))
+
+    def _check_update(self):
+        self.status_bar.showMessage("正在检查更新…")
+        self._update_checker = _UpdateChecker()
+        self._update_checker.result_ready.connect(self._on_update_result)
+        self._update_checker.start()
+
+    def _on_update_result(self, latest, error):
+        self.status_bar.clearMessage()
+        current = QApplication.instance().applicationVersion()
+        if error:
+            QMessageBox.information(self, "检查更新", "无法连接到服务器，请检查网络后重试")
+        elif latest == current:
+            QMessageBox.information(self, "检查更新", f"当前已是最新版本 v{current}")
+        else:
+            QMessageBox.information(self, "检查更新",
+                f"发现新版本 v{latest}（当前 v{current}）\n请前往项目主页下载更新")
 
     def set_project(self, project):
         self.project = project
