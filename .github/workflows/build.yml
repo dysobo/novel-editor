@@ -26,11 +26,16 @@ jobs:
           pip install -r requirements.txt
           pip install pyinstaller
 
+      - name: Get version
+        id: version
+        shell: bash
+        run: echo "tag=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
+
       - name: Build exe
         run: |
-          pyinstaller --noconfirm --onefile --windowed --name "小说编辑器" --add-data "resources;resources" main.py
+          pyinstaller --noconfirm --onefile --windowed --name "${{ steps.version.outputs.tag }}.小说编辑器" --add-data "resources;resources" main.py
 
       - name: Upload to Release
         uses: softprops/action-gh-release@v2
         with:
-          files: dist/小说编辑器.exe
+          files: dist/${{ steps.version.outputs.tag }}.小说编辑器.exe
