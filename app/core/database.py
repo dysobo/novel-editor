@@ -54,6 +54,7 @@ class Database:
                 title TEXT NOT NULL DEFAULT '',
                 content TEXT DEFAULT '',
                 sort_order INTEGER DEFAULT 0,
+                chapter_id INTEGER DEFAULT NULL,
                 created_at TEXT DEFAULT (datetime('now','localtime')),
                 updated_at TEXT DEFAULT (datetime('now','localtime'))
             );
@@ -67,8 +68,27 @@ class Database:
                 created_at TEXT DEFAULT (datetime('now','localtime')),
                 FOREIGN KEY (chapter_id) REFERENCES chapters(id) ON DELETE CASCADE
             );
+
+            CREATE TABLE IF NOT EXISTS character_relationships (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                character_a_id INTEGER NOT NULL,
+                character_b_id INTEGER NOT NULL,
+                relation_type TEXT DEFAULT '朋友',
+                description TEXT DEFAULT '',
+                FOREIGN KEY (character_a_id) REFERENCES characters(id) ON DELETE CASCADE,
+                FOREIGN KEY (character_b_id) REFERENCES characters(id) ON DELETE CASCADE
+            );
         """)
         self._conn.commit()
+        self._migrate()
+
+    def _migrate(self):
+        """增量迁移：为旧数据库添加新字段"""
+        cur = self._conn.execute("PRAGMA table_info(outlines)")
+        cols = [r[1] for r in cur.fetchall()]
+        if "chapter_id" not in cols:
+            self._conn.execute("ALTER TABLE outlines ADD COLUMN chapter_id INTEGER DEFAULT NULL")
+            self._conn.commit()
 
     def close(self):
         self._conn.close()
@@ -187,10 +207,10 @@ class Database:
         self._conn.commit()
 
     # ── 大纲 CRUD ──
-    def add_outline(self, title, level="chapter", parent_id=None, content=""):
+    def add_outline(self, title, level="chapter", parent_id=None, content="", chapter_id=None):
         cur = self._conn.execute(
-            "INSERT INTO outlines (title, level, parent_id, content) VALUES (?, ?, ?, ?)",
-            (title, level, parent_id, content),
+            "INSERT INTO outlines (title, level, parent_id, content, chapter_id) VALUES (?, ?, ?, ?, ?)",
+            (title, level, parent_id, content, chapter_id),
         )
         self._conn.commit()
         return cur.lastrowid
@@ -206,7 +226,7 @@ class Database:
         ).fetchall()
 
     def update_outline(self, outline_id, **kwargs):
-        allowed = {"title", "level", "content", "parent_id", "sort_order"}
+        allowed = {"title", "level", "content", "parent_id", "sort_order", "chapter_id"}
         fields = {k: v for k, v in kwargs.items() if k in allowed}
         if not fields:
             return
@@ -255,3 +275,34 @@ class Database:
             "SELECT DISTINCT category FROM world_settings ORDER BY category"
         ).fetchall()
         return [r["category"] for r in rows]
+
+    # ── 角色关系 CRUD ──
+    def add_relationship(self, char_a_id, char_b_id, relation_type="朋友", description=""):
+        cur = self._conn.execute(
+            "INSERT INTO character_relationships (character_a_id, character_b_id, relation_type, description) VALUES (?, ?, ?, ?)",
+            (char_a_id, char_b_id, relation_type, description),
+        )
+        self._conn.commit()
+        return cur.lastrowid
+
+    def get_relationships(self):
+        return self._conn.execute(
+            "SELECT cr.*, ca.name as name_a, cb.name as name_b "
+            "FROM character_relationships cr "
+            "JOIN characters ca ON cr.character_a_id = ca.id "
+            "JOIN characters cb ON cr.character_b_id = cb.id"
+        ).fetchall()
+
+    def update_relationship(self, rel_id, **kwargs):
+        allowed = {"relation_type", "description"}
+        fields = {k: v for k, v in kwargs.items() if k in allowed}
+        if not fields:
+            return
+        sets = ", ".join(f"{k}=?" for k in fields)
+        vals = list(fields.values()) + [rel_id]
+        self._conn.execute(f"UPDATE character_relationships SET {sets} WHERE id=?", vals)
+        self._conn.commit()
+
+    def delete_relationship(self, rel_id):
+        self._conn.execute("DELETE FROM character_relationships WHERE id=?", (rel_id,))
+        self._conn.commit()

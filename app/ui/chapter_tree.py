@@ -135,3 +135,20 @@ class ChapterTree(QWidget):
         if ret == QMessageBox.Yes:
             self.project.db.delete_chapter(ch_id)
             self.reload()
+
+    def locate_chapter(self, chapter_id):
+        """递归查找并选中指定 chapter_id 的节点"""
+        item = self._find_item_by_id(self.tree.invisibleRootItem(), chapter_id)
+        if item:
+            self.tree.setCurrentItem(item)
+            self.tree.scrollToItem(item)
+
+    def _find_item_by_id(self, parent_item, chapter_id):
+        for i in range(parent_item.childCount()):
+            child = parent_item.child(i)
+            if child.data(0, Qt.UserRole) == chapter_id:
+                return child
+            found = self._find_item_by_id(child, chapter_id)
+            if found:
+                return found
+        return None

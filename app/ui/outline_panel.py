@@ -3,10 +3,12 @@ from PySide6.QtWidgets import (
     QPushButton, QLabel, QTextEdit, QLineEdit, QInputDialog,
     QMessageBox, QComboBox, QSplitter, QFormLayout,
 )
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, Signal
 
 
 class OutlinePanel(QWidget):
+    chapter_locate_requested = Signal(int)
+
     def __init__(self, project=None):
         super().__init__()
         self.project = project
@@ -44,6 +46,7 @@ class OutlinePanel(QWidget):
         self.outline_tree.setHeaderLabel("大纲结构")
         self.outline_tree.setDragDropMode(QTreeWidget.InternalMove)
         self.outline_tree.currentItemChanged.connect(self._on_select)
+        self.outline_tree.itemDoubleClicked.connect(self._on_double_click)
         top_layout.addWidget(self.outline_tree)
         splitter.addWidget(top)
 
@@ -136,3 +139,13 @@ class OutlinePanel(QWidget):
             content=self.content_edit.toPlainText(),
         )
         self.reload()
+
+    def _on_double_click(self, item, column):
+        """双击大纲项时，定位到对应章节"""
+        if not item or not self.project:
+            return
+        oid = item.data(0, Qt.UserRole)
+        conn = self.project.db._conn
+        row = conn.execute("SELECT chapter_id FROM outlines WHERE id=?", (oid,)).fetchone()
+        if row and row["chapter_id"]:
+            self.chapter_locate_requested.emit(row["chapter_id"])

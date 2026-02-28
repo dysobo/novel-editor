@@ -56,6 +56,7 @@ class MainWindow(QMainWindow):
         self.chapter_tree.chapter_selected.connect(self._on_chapter_selected)
         self.editor.content_changed.connect(self._on_content_changed)
         self.ai_dialog.insert_requested.connect(self._on_ai_insert)
+        self.outline_panel.chapter_locate_requested.connect(self.chapter_tree.locate_chapter)
 
     def _init_menu(self):
         mb = self.menuBar()
@@ -115,6 +116,7 @@ class MainWindow(QMainWindow):
     def _on_chapter_selected(self, chapter_id):
         self._save_current()
         self._current_chapter_id = chapter_id
+        self.ai_dialog.set_chat_chapter_id(chapter_id)
         if self.project:
             ch = self.project.db.get_chapter(chapter_id)
             if ch:

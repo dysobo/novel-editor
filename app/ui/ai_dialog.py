@@ -2,9 +2,10 @@ import re
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QTextEdit, QPushButton,
     QLabel, QLineEdit, QFormLayout, QMessageBox, QStackedWidget,
-    QInputDialog, QDialog, QDialogButtonBox,
+    QInputDialog, QDialog, QDialogButtonBox, QListWidget,
+    QListWidgetItem, QProgressBar,
 )
-from PySide6.QtCore import Qt, QThread, Signal as QSignal
+from PySide6.QtCore import Qt, QThread, QTimer, Signal as QSignal
 
 
 class AIWorker(QThread):
@@ -59,6 +60,13 @@ class AIDialog(QWidget):
         self.ai_tasks = None
         self._worker = None
         self._accumulated = ""
+        self._batch_mode = False
+        self._batch_queue = []
+        self._batch_total = 0
+        self._batch_done = 0
+        self._chat_history = []
+        self._chat_chapter_id = None
+        self._chat_accumulated = ""
         self._init_ui()
 
     def _init_ui(self):
@@ -68,6 +76,7 @@ class AIDialog(QWidget):
         self.stack = QStackedWidget()
         self.stack.addWidget(self._build_output_page())
         self.stack.addWidget(self._build_settings_page())
+        self.stack.addWidget(self._build_chat_page())
         layout.addWidget(self.stack)
 
     def _build_output_page(self):
@@ -92,7 +101,19 @@ class AIDialog(QWidget):
         self.btn_write_ch1 = QPushButton("写章节")
         self.btn_write_ch1.clicked.connect(self._write_next_chapter)
         quick_row.addWidget(self.btn_write_ch1)
+
+        self.btn_batch = QPushButton("批量写章节")
+        self.btn_batch.clicked.connect(self._batch_write_chapters)
+        quick_row.addWidget(self.btn_batch)
         vbox.addLayout(quick_row)
+
+        # 批量进度条
+        self.batch_progress = QProgressBar()
+        self.batch_progress.setVisible(False)
+        vbox.addWidget(self.batch_progress)
+        self.batch_label = QLabel("")
+        self.batch_label.setVisible(False)
+        vbox.addWidget(self.batch_label)
 
         # 控制按钮
         btn_row = QHBoxLayout()
@@ -108,6 +129,10 @@ class AIDialog(QWidget):
         self.btn_settings = QPushButton("设置")
         self.btn_settings.clicked.connect(self.show_settings)
         btn_row.addWidget(self.btn_settings)
+
+        self.btn_chat_mode = QPushButton("对话模式")
+        self.btn_chat_mode.clicked.connect(lambda: self.stack.setCurrentIndex(2))
+        btn_row.addWidget(self.btn_chat_mode)
         vbox.addLayout(btn_row)
 
         return page
@@ -143,6 +168,46 @@ class AIDialog(QWidget):
         vbox.addLayout(btn_row)
 
         vbox.addStretch()
+        return page
+
+    def _build_chat_page(self):
+        page = QWidget()
+        vbox = QVBoxLayout(page)
+
+        # 顶部标题栏
+        top_row = QHBoxLayout()
+        label = QLabel("AI 对话")
+        label.setStyleSheet("font-size: 14px; font-weight: bold;")
+        top_row.addWidget(label)
+        top_row.addStretch()
+        btn_back = QPushButton("返回")
+        btn_back.clicked.connect(lambda: self.stack.setCurrentIndex(0))
+        top_row.addWidget(btn_back)
+        vbox.addLayout(top_row)
+
+        # 消息显示区
+        self.chat_display = QTextEdit()
+        self.chat_display.setReadOnly(True)
+        self.chat_display.setPlaceholderText("与 AI 讨论你的小说...")
+        vbox.addWidget(self.chat_display)
+
+        # 输入区
+        self.chat_input = QTextEdit()
+        self.chat_input.setPlaceholderText("输入你的问题...")
+        self.chat_input.setMaximumHeight(80)
+        vbox.addWidget(self.chat_input)
+
+        # 按钮行
+        btn_row = QHBoxLayout()
+        self.btn_send = QPushButton("发送")
+        self.btn_send.clicked.connect(self._send_chat)
+        btn_row.addWidget(self.btn_send)
+
+        self.btn_clear_chat = QPushButton("清空对话")
+        self.btn_clear_chat.clicked.connect(self._clear_chat)
+        btn_row.addWidget(self.btn_clear_chat)
+        vbox.addLayout(btn_row)
+
         return page
 
     def set_project(self, project):
@@ -243,6 +308,18 @@ class AIDialog(QWidget):
             self._writing_chapter_id = None
             self._refresh_chapter_tree()
 
+            # 批量模式：延迟1秒写下一章
+            if self._batch_mode and self._batch_queue:
+                self._batch_done += 1
+                self.batch_progress.setValue(self._batch_done)
+                self.batch_label.setText(
+                    f"进度: {self._batch_done}/{self._batch_total}"
+                )
+                QTimer.singleShot(1000, self._write_next_in_batch)
+                return
+            elif self._batch_mode:
+                self._finish_batch()
+
     def _on_error(self, msg):
         self.btn_stop.setEnabled(False)
         self.output.append(f"\n\n[错误] {msg}")
@@ -266,6 +343,10 @@ class AIDialog(QWidget):
                 self._worker.stop()
             self._worker.quit()
             self.btn_stop.setEnabled(False)
+        # 批量模式下停止整个队列
+        if self._batch_mode:
+            self._batch_queue.clear()
+            self._finish_batch()
 
     def _insert_to_editor(self):
         text = self.output.toPlainText().strip()
@@ -374,10 +455,11 @@ class AIDialog(QWidget):
                 )
             elif etype == "ch" and current_volume_id is not None:
                 chapter_count += 1
-                db.add_chapter(title=title, parent_id=current_volume_id)
+                ch_id = db.add_chapter(title=title, parent_id=current_volume_id)
                 db.add_outline(
                     title=title, level="chapter",
-                    parent_id=current_outline_vol_id, content=summary
+                    parent_id=current_outline_vol_id, content=summary,
+                    chapter_id=ch_id
                 )
 
         if chapter_count > 0:
@@ -478,3 +560,172 @@ class AIDialog(QWidget):
         gen = self.ai_tasks.write_chapter_stream(msgs)
         self._writing_chapter_id = chapter["id"]
         self._run_stream(gen)
+
+    # ── 批量写章节 ──
+    def _batch_write_chapters(self):
+        if not self.project:
+            QMessageBox.information(self, "提示", "请先新建或打开项目")
+            return
+        if not self.ai_tasks:
+            self._init_ai_tasks()
+        if not self.ai_tasks or not self.ai_tasks.client.is_configured:
+            QMessageBox.warning(self, "提示", "请先配置 AI")
+            self.show_settings()
+            return
+
+        db = self.project.db
+        volumes = db.get_chapters(parent_id=None)
+        if not volumes:
+            QMessageBox.warning(self, "提示", "请先生成大纲")
+            return
+
+        # 构建章节列表
+        chapter_list = []
+        for vol in volumes:
+            for ch in db.get_chapters(parent_id=vol["id"]):
+                plain = re.sub(r'<[^>]+>', '', (ch["content"] or "")).strip()
+                has_content = bool(plain)
+                chapter_list.append((vol["title"], ch, has_content))
+
+        if not chapter_list:
+            QMessageBox.warning(self, "提示", "未找到章节")
+            return
+
+        # 弹出勾选对话框
+        dlg = QDialog(self)
+        dlg.setWindowTitle("批量写章节")
+        dlg.setMinimumWidth(400)
+        dlg.setMinimumHeight(350)
+        vbox = QVBoxLayout(dlg)
+        vbox.addWidget(QLabel("勾选要生成的章节（已有内容的章节将被覆盖）："))
+
+        list_widget = QListWidget()
+        for vol_title, ch, has_content in chapter_list:
+            mark = "✓" if has_content else "○"
+            item = QListWidgetItem(f"{mark}  {vol_title} / {ch['title']}")
+            item.setFlags(item.flags() | Qt.ItemIsUserCheckable)
+            item.setCheckState(Qt.Unchecked if has_content else Qt.Checked)
+            item.setData(Qt.UserRole, ch["id"])
+            list_widget.addItem(item)
+        vbox.addWidget(list_widget)
+
+        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        buttons.accepted.connect(dlg.accept)
+        buttons.rejected.connect(dlg.reject)
+        vbox.addWidget(buttons)
+
+        if dlg.exec() != QDialog.Accepted:
+            return
+
+        # 收集勾选的章节 ID
+        selected_ids = []
+        for i in range(list_widget.count()):
+            item = list_widget.item(i)
+            if item.checkState() == Qt.Checked:
+                selected_ids.append(item.data(Qt.UserRole))
+
+        if not selected_ids:
+            return
+
+        # 启动批量模式
+        self._batch_queue = selected_ids
+        self._batch_total = len(selected_ids)
+        self._batch_done = 0
+        self._batch_mode = True
+        self.batch_progress.setMaximum(self._batch_total)
+        self.batch_progress.setValue(0)
+        self.batch_progress.setVisible(True)
+        self.batch_label.setText(f"进度: 0/{self._batch_total}")
+        self.batch_label.setVisible(True)
+        self.btn_batch.setEnabled(False)
+        self.btn_write_ch1.setEnabled(False)
+        self.btn_outline.setEnabled(False)
+
+        self._write_next_in_batch()
+
+    def _write_next_in_batch(self):
+        if not self._batch_queue:
+            self._finish_batch()
+            return
+        chapter_id = self._batch_queue.pop(0)
+        chapter = self.project.db.get_chapter(chapter_id)
+        if chapter:
+            self._start_write_chapter(chapter)
+
+    def _finish_batch(self):
+        self._batch_mode = False
+        self._batch_queue.clear()
+        self.batch_progress.setVisible(False)
+        self.batch_label.setVisible(False)
+        self.btn_batch.setEnabled(True)
+        self.btn_write_ch1.setEnabled(True)
+        self.btn_outline.setEnabled(True)
+        self.output.append(f"\n\n=== 批量生成完成 ({self._batch_done}/{self._batch_total}) ===")
+
+    # ── 对话模式 ──
+    def set_chat_chapter_id(self, chapter_id):
+        self._chat_chapter_id = chapter_id
+
+    def _send_chat(self):
+        if not self.project:
+            QMessageBox.information(self, "提示", "请先新建或打开项目")
+            return
+        if not self.ai_tasks:
+            self._init_ai_tasks()
+        if not self.ai_tasks or not self.ai_tasks.client.is_configured:
+            QMessageBox.warning(self, "提示", "请先配置 AI")
+            self.show_settings()
+            return
+
+        user_text = self.chat_input.toPlainText().strip()
+        if not user_text:
+            return
+
+        # 显示用户消息
+        self.chat_display.append(f"<b>你:</b> {user_text}\n")
+        self.chat_input.clear()
+
+        # 添加到历史
+        self._chat_history.append({"role": "user", "content": user_text})
+
+        # 构建消息并发送
+        msgs = self.ai_tasks.build_chat_messages(
+            self._chat_history, self._chat_chapter_id
+        )
+        self._chat_accumulated = ""
+        self.chat_display.append("<b>AI:</b> ")
+        self.btn_send.setEnabled(False)
+
+        self._chat_worker = AIWorker(self.ai_tasks.chat_stream(msgs))
+        self._chat_worker.chunk_received.connect(self._on_chat_chunk)
+        self._chat_worker.finished_signal.connect(self._on_chat_finished)
+        self._chat_worker.error_signal.connect(self._on_chat_error)
+        self._chat_worker.start()
+
+    def _on_chat_chunk(self, text):
+        self._chat_accumulated += text
+        # 更新最后一行的 AI 回复
+        cursor = self.chat_display.textCursor()
+        cursor.movePosition(cursor.MoveOperation.End)
+        cursor.insertText(text)
+        self.chat_display.setTextCursor(cursor)
+        scrollbar = self.chat_display.verticalScrollBar()
+        scrollbar.setValue(scrollbar.maximum())
+
+    def _on_chat_finished(self):
+        self.btn_send.setEnabled(True)
+        if self._chat_accumulated:
+            self._chat_history.append({
+                "role": "assistant",
+                "content": self._chat_accumulated,
+            })
+        self.chat_display.append("\n")
+
+    def _on_chat_error(self, msg):
+        self.btn_send.setEnabled(True)
+        self.chat_display.append(f"\n<b>[错误]</b> {msg}\n")
+
+    def _clear_chat(self):
+        self._chat_history.clear()
+        self._chat_accumulated = ""
+        self.chat_display.clear()

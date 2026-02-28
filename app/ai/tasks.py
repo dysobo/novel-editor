@@ -5,6 +5,7 @@ from app.ai.prompts import (
     SYSTEM_BASE, CONTINUE_PROMPT, POLISH_PROMPT,
     SUMMARY_PROMPT, OUTLINE_PROMPT,
     GENERATE_OUTLINE_PROMPT, WRITE_CHAPTER_PROMPT,
+    CHAT_SYSTEM_PROMPT,
 )
 from app.core.database import Database
 
@@ -108,3 +109,15 @@ class AITasks:
     def write_chapter_stream(self, messages):
         """子线程：纯 AI 调用"""
         return self.client.chat_stream(messages, max_tokens=4000)
+
+    def build_chat_messages(self, history: list, chapter_id: int = None):
+        """主线程：构建对话消息，注入小说上下文"""
+        context_msgs = self.memory.build_context(chapter_id)
+        messages = [{"role": "system", "content": CHAT_SYSTEM_PROMPT}]
+        messages.extend(context_msgs)
+        messages.extend(history)
+        return messages
+
+    def chat_stream(self, messages):
+        """子线程：对话流式调用"""
+        return self.client.chat_stream(messages)

@@ -1,9 +1,11 @@
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QListWidget, QListWidgetItem,
     QPushButton, QLabel, QTextEdit, QLineEdit, QInputDialog,
-    QMessageBox, QFormLayout, QGroupBox, QSplitter,
+    QMessageBox, QFormLayout, QSplitter, QTabWidget, QComboBox,
+    QDialog, QDialogButtonBox,
 )
 from PySide6.QtCore import Qt
+from app.ui.relationship_graph import RelationshipGraph, RELATION_COLORS
 
 
 class CharacterPanel(QWidget):
@@ -21,7 +23,17 @@ class CharacterPanel(QWidget):
         title.setStyleSheet("font-size: 16px; font-weight: bold;")
         layout.addWidget(title)
 
+        self.tabs = QTabWidget()
+        self.tabs.addTab(self._build_list_tab(), "角色列表")
+        self.tabs.addTab(self._build_graph_tab(), "关系图")
+        self.tabs.currentChanged.connect(self._on_tab_changed)
+        layout.addWidget(self.tabs)
+
+    def _build_list_tab(self):
+        tab = QWidget()
         splitter = QSplitter(Qt.Vertical)
+        tab_layout = QVBoxLayout(tab)
+        tab_layout.setContentsMargins(0, 0, 0, 0)
 
         # 上半：角色列表
         top = QWidget()
@@ -59,7 +71,39 @@ class CharacterPanel(QWidget):
         form_layout.addRow(btn_save)
         splitter.addWidget(bottom)
 
-        layout.addWidget(splitter)
+        tab_layout.addWidget(splitter)
+        return tab
+
+    def _build_graph_tab(self):
+        tab = QWidget()
+        vbox = QVBoxLayout(tab)
+        vbox.setContentsMargins(0, 0, 0, 0)
+
+        # 关系图
+        self.graph = RelationshipGraph()
+        vbox.addWidget(self.graph)
+
+        # 按钮行
+        btn_row = QHBoxLayout()
+        btn_add_rel = QPushButton("+ 添加关系")
+        btn_add_rel.clicked.connect(self._add_relationship)
+        btn_row.addWidget(btn_add_rel)
+
+        btn_del_rel = QPushButton("删除关系")
+        btn_del_rel.clicked.connect(self._delete_relationship)
+        btn_row.addWidget(btn_del_rel)
+        vbox.addLayout(btn_row)
+
+        # 关系列表
+        self.rel_list = QListWidget()
+        self.rel_list.setMaximumHeight(120)
+        vbox.addWidget(self.rel_list)
+
+        return tab
+
+    def _on_tab_changed(self, index):
+        if index == 1:
+            self._refresh_graph()
 
     def set_project(self, project):
         self.project = project
@@ -76,6 +120,8 @@ class CharacterPanel(QWidget):
             item = QListWidgetItem(ch["name"])
             item.setData(Qt.UserRole, ch["id"])
             self.char_list.addItem(item)
+        if self.tabs.currentIndex() == 1:
+            self._refresh_graph()
 
     def _on_select(self, current, previous):
         if not current or not self.project:
@@ -89,7 +135,7 @@ class CharacterPanel(QWidget):
 
     def _add_character(self):
         if not self.project:
-            QMessageBox.information(self, "提示", "请先通过 文件→新建项目 或 文件→打开项目 创建/打开一个项目")
+            QMessageBox.information(self, "提示", "请先创建或打开项目")
             return
         name, ok = QInputDialog.getText(self, "新建角色", "角色名称:")
         if ok and name:
@@ -112,7 +158,90 @@ class CharacterPanel(QWidget):
             name=self.name_edit.text(),
             description=self.desc_edit.toPlainText(),
         )
-        # 刷新列表中的名称
         current = self.char_list.currentItem()
         if current:
             current.setText(self.name_edit.text())
+
+    # ── 关系图相关 ──
+    def _refresh_graph(self):
+        if not self.project:
+            return
+        characters = [dict(c) for c in self.project.db.get_characters()]
+        relationships = [dict(r) for r in self.project.db.get_relationships()]
+        self.graph.set_data(characters, relationships)
+        # 刷新关系列表
+        self.rel_list.clear()
+        for r in relationships:
+            text = f"{r['name_a']} ↔ {r['name_b']}：{r['relation_type']}"
+            item = QListWidgetItem(text)
+            item.setData(Qt.UserRole, r["id"])
+            self.rel_list.addItem(item)
+
+    def _add_relationship(self):
+        if not self.project:
+            return
+        characters = self.project.db.get_characters()
+        if len(characters) < 2:
+            QMessageBox.warning(self, "提示", "至少需要2个角色才能添加关系")
+            return
+
+        names = [c["name"] for c in characters]
+        ids = [c["id"] for c in characters]
+
+        dlg = QDialog(self)
+        dlg.setWindowTitle("添加角色关系")
+        dlg.setMinimumWidth(300)
+        form = QFormLayout(dlg)
+
+        combo_a = QComboBox()
+        combo_a.addItems(names)
+        form.addRow("角色A:", combo_a)
+
+        combo_b = QComboBox()
+        combo_b.addItems(names)
+        if len(names) > 1:
+            combo_b.setCurrentIndex(1)
+        form.addRow("角色B:", combo_b)
+
+        rel_types = list(RELATION_COLORS.keys())
+        combo_type = QComboBox()
+        combo_type.addItems(rel_types)
+        form.addRow("关系类型:", combo_type)
+
+        desc_input = QLineEdit()
+        desc_input.setPlaceholderText("关系描述（可选）")
+        form.addRow("描述:", desc_input)
+
+        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        buttons.accepted.connect(dlg.accept)
+        buttons.rejected.connect(dlg.reject)
+        form.addRow(buttons)
+
+        if dlg.exec() != QDialog.Accepted:
+            return
+
+        idx_a = combo_a.currentIndex()
+        idx_b = combo_b.currentIndex()
+        if idx_a == idx_b:
+            QMessageBox.warning(self, "提示", "不能选择同一个角色")
+            return
+
+        self.project.db.add_relationship(
+            ids[idx_a], ids[idx_b],
+            combo_type.currentText(),
+            desc_input.text().strip(),
+        )
+        self._refresh_graph()
+
+    def _delete_relationship(self):
+        if not self.project:
+            return
+        current = self.rel_list.currentItem()
+        if not current:
+            QMessageBox.information(self, "提示", "请先在关系列表中选择一条关系")
+            return
+        rel_id = current.data(Qt.UserRole)
+        ret = QMessageBox.question(self, "确认", "确定删除该关系？")
+        if ret == QMessageBox.Yes:
+            self.project.db.delete_relationship(rel_id)
+            self._refresh_graph()
