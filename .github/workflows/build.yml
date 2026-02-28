@@ -41,6 +41,10 @@ jobs:
           Rename-Item -Path "dist/novel-editor.exe" -NewName "${{ steps.version.outputs.tag }}.小说编辑器.exe"
 
       - name: Upload to Release
-        uses: softprops/action-gh-release@v2
-        with:
-          files: dist/*.exe
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $tag = "${{ steps.version.outputs.tag }}"
+          $file = "dist/${tag}.小说编辑器.exe"
+          gh release upload $tag $file --clobber
