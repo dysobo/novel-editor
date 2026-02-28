@@ -38,7 +38,7 @@ jobs:
       - name: Rename exe
         shell: pwsh
         run: |
-          Rename-Item -Path "dist/novel-editor.exe" -NewName "${{ steps.version.outputs.tag }}.小说编辑器.exe"
+          Rename-Item -Path "dist/novel-editor.exe" -NewName "${{ steps.version.outputs.tag }}.novel-editor.exe"
 
       - name: Upload to Release
         shell: pwsh
@@ -46,5 +46,4 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           $tag = "${{ steps.version.outputs.tag }}"
-          $file = "dist/${tag}.小说编辑器.exe"
-          gh release upload $tag $file --clobber
+          gh release upload $tag "dist/${tag}.novel-editor.exe" --clobber
