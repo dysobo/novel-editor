@@ -33,6 +33,7 @@ class MainWindow(QMainWindow):
     def __init__(self, project=None):
         super().__init__()
         self.project = project
+        self._current_chapter_id = None
         self.setWindowTitle("小说编辑器")
         self.setMinimumSize(1200, 700)
         self._init_ui()
@@ -155,7 +156,9 @@ class MainWindow(QMainWindow):
         self.word_count_label.setText(f"字数: {wc}")
 
     def _save_current(self):
-        if not self.project or not hasattr(self, "_current_chapter_id"):
+        if not self.project or self._current_chapter_id is None:
+            return
+        if not self.project.db.get_chapter(self._current_chapter_id):
             return
         content = self.editor.get_content()
         plain = self.editor.get_plain_text()
@@ -163,6 +166,17 @@ class MainWindow(QMainWindow):
         self.project.db.update_chapter(
             self._current_chapter_id, content=content, word_count=wc
         )
+
+    def _switch_project(self, new_project):
+        self._save_current()
+        old_project = self.project
+        if old_project and old_project is not new_project:
+            try:
+                old_project.close()
+            except Exception:
+                pass
+        self.project = new_project
+        self._reload_project()
 
     def _new_project(self):
         from app.core.project import Project
@@ -172,8 +186,8 @@ class MainWindow(QMainWindow):
         if path:
             if not path.endswith(".novel"):
                 path += ".novel"
-            self.project = Project.create(path)
-            self._reload_project()
+            project = Project.create(path)
+            self._switch_project(project)
 
     def _open_project(self):
         from app.core.project import Project
@@ -181,10 +195,20 @@ class MainWindow(QMainWindow):
             self, "打开项目", "", "小说项目 (*.novel)"
         )
         if path:
-            self.project = Project.open(path)
-            self._reload_project()
+            project = Project.open(path)
+            self._switch_project(project)
 
     def _reload_project(self):
+        self._current_chapter_id = None
+        self.ai_dialog.set_chat_chapter_id(None)
+        self.word_count_label.setText("字数: 0")
+        self.editor.clear()
+
+        if not self.project:
+            version = QApplication.instance().applicationVersion()
+            self.setWindowTitle(f"小说编辑器 v{version}")
+            return
+
         version = QApplication.instance().applicationVersion()
         self.setWindowTitle(f"小说编辑器 v{version} - {self.project.name}")
         self.chapter_tree.set_project(self.project)
@@ -192,7 +216,6 @@ class MainWindow(QMainWindow):
         self.outline_panel.set_project(self.project)
         self.world_panel.set_project(self.project)
         self.ai_dialog.set_project(self.project)
-        self.editor.clear()
 
     def _export_txt(self):
         if not self.project:
@@ -214,7 +237,11 @@ class MainWindow(QMainWindow):
 
     def _ai_continue(self):
         self.right_stack.setCurrentIndex(3)
-        self.ai_dialog.start_task("continue", self.editor.get_plain_text())
+        self.ai_dialog.start_task(
+            "continue",
+            self.editor.get_plain_text(),
+            chapter_id=self._current_chapter_id,
+        )
 
     def _ai_polish(self):
         selected = self.editor.get_selected_text()
@@ -225,7 +252,7 @@ class MainWindow(QMainWindow):
         self.ai_dialog.start_task("polish", selected)
 
     def _ai_summary(self):
-        if not self.project or not hasattr(self, "_current_chapter_id"):
+        if not self.project or self._current_chapter_id is None:
             return
         self.right_stack.setCurrentIndex(3)
         self.ai_dialog.start_task("summary", self.editor.get_plain_text(),
@@ -267,11 +294,10 @@ class MainWindow(QMainWindow):
                 f"发现新版本 v{latest}（当前 v{current}）\n请前往项目主页下载更新")
 
     def set_project(self, project):
-        self.project = project
-        self._reload_project()
+        self._switch_project(project)
 
     def closeEvent(self, event):
         self._save_current()
         if self.project:
-            self.project.db.close()
+            self.project.close()
         event.accept()

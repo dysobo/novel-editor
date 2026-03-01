@@ -207,10 +207,10 @@ class Database:
         self._conn.commit()
 
     # ── 大纲 CRUD ──
-    def add_outline(self, title, level="chapter", parent_id=None, content="", chapter_id=None):
+    def add_outline(self, title, level="chapter", parent_id=None, content="", chapter_id=None, sort_order=0):
         cur = self._conn.execute(
-            "INSERT INTO outlines (title, level, parent_id, content, chapter_id) VALUES (?, ?, ?, ?, ?)",
-            (title, level, parent_id, content, chapter_id),
+            "INSERT INTO outlines (title, level, parent_id, content, chapter_id, sort_order) VALUES (?, ?, ?, ?, ?, ?)",
+            (title, level, parent_id, content, chapter_id, sort_order),
         )
         self._conn.commit()
         return cur.lastrowid
@@ -306,3 +306,5 @@ class Database:
     def delete_relationship(self, rel_id):
         self._conn.execute("DELETE FROM character_relationships WHERE id=?", (rel_id,))
         self._conn.commit()
+
+

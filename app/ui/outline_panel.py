@@ -45,8 +45,10 @@ class OutlinePanel(QWidget):
         self.outline_tree = QTreeWidget()
         self.outline_tree.setHeaderLabel("大纲结构")
         self.outline_tree.setDragDropMode(QTreeWidget.InternalMove)
+        self.outline_tree.setDefaultDropAction(Qt.MoveAction)
         self.outline_tree.currentItemChanged.connect(self._on_select)
         self.outline_tree.itemDoubleClicked.connect(self._on_double_click)
+        self.outline_tree.model().rowsMoved.connect(self._on_rows_moved)
         top_layout.addWidget(self.outline_tree)
         splitter.addWidget(top)
 
@@ -89,18 +91,28 @@ class OutlinePanel(QWidget):
             parent_item.addChild(item)
             self._load_children(o["id"], item)
 
+    def _on_rows_moved(self, *args):
+        self._save_sort_order(self.outline_tree.invisibleRootItem(), None)
+
+    def _save_sort_order(self, parent_item, parent_id):
+        if not self.project:
+            return
+        for i in range(parent_item.childCount()):
+            child = parent_item.child(i)
+            outline_id = child.data(0, Qt.UserRole)
+            if outline_id:
+                self.project.db.update_outline(outline_id, parent_id=parent_id, sort_order=i)
+                self._save_sort_order(child, outline_id)
+
     def _on_select(self, current, previous):
         if not current or not self.project:
             return
         oid = current.data(0, Qt.UserRole)
         self._current_id = oid
-        outlines = self.project.db.get_outlines()
-        # 递归查找
         self._fill_from_db(oid)
 
     def _fill_from_db(self, oid):
         """从数据库加载大纲详情到编辑区"""
-        # 简单遍历所有大纲查找
         conn = self.project.db._conn
         row = conn.execute("SELECT * FROM outlines WHERE id=?", (oid,)).fetchone()
         if row:
@@ -119,7 +131,14 @@ class OutlinePanel(QWidget):
             current = self.outline_tree.currentItem()
             if current:
                 parent_id = current.data(0, Qt.UserRole) or None
-            self.project.db.add_outline(title, level=level, parent_id=parent_id)
+            # 默认追加到当前父节点末尾
+            max_order = len(self.project.db.get_outlines(parent_id))
+            self.project.db.add_outline(
+                title,
+                level=level,
+                parent_id=parent_id,
+                sort_order=max_order,
+            )
             self.reload()
 
     def _delete_outline(self):
@@ -149,3 +168,4 @@ class OutlinePanel(QWidget):
         row = conn.execute("SELECT chapter_id FROM outlines WHERE id=?", (oid,)).fetchone()
         if row and row["chapter_id"]:
             self.chapter_locate_requested.emit(row["chapter_id"])
+

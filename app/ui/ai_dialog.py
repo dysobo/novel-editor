@@ -64,6 +64,8 @@ class AIDialog(QWidget):
         self._batch_queue = []
         self._batch_total = 0
         self._batch_done = 0
+        self._batch_failed = 0
+        self._writing_chapter_id = None
         self._chat_history = []
         self._chat_chapter_id = None
         self._chat_accumulated = ""
@@ -295,35 +297,39 @@ class AIDialog(QWidget):
 
     def _on_finished(self):
         self.btn_stop.setEnabled(False)
-        # 如果是写章节任务，自动保存内容到数据库
-        if hasattr(self, '_writing_chapter_id') and self._writing_chapter_id and self._accumulated.strip():
+
+        if self._writing_chapter_id is None:
+            return
+
+        chapter_id = self._writing_chapter_id
+        self._writing_chapter_id = None
+        generated = self._accumulated.strip()
+
+        if generated:
             self.project.db.update_chapter(
-                self._writing_chapter_id,
-                content=self._accumulated.strip(),
-                word_count=len(self._accumulated.replace(" ", "").replace("\n", "")),
+                chapter_id,
+                content=generated,
+                word_count=len(generated.replace(" ", "").replace("\n", "")),
             )
-            title = self.project.db.get_chapter(self._writing_chapter_id)
+            title = self.project.db.get_chapter(chapter_id)
             ch_title = title["title"] if title else ""
             self.output.append(f"\n\n--- 已自动保存到「{ch_title}」---")
-            self._writing_chapter_id = None
             self._refresh_chapter_tree()
 
-            # 批量模式：延迟1秒写下一章
-            if self._batch_mode and self._batch_queue:
-                self._batch_done += 1
-                self.batch_progress.setValue(self._batch_done)
-                self.batch_label.setText(
-                    f"进度: {self._batch_done}/{self._batch_total}"
-                )
-                QTimer.singleShot(1000, self._write_next_in_batch)
-                return
-            elif self._batch_mode:
-                self._finish_batch()
-
+            if self._batch_mode:
+                self._advance_batch(success=True)
+        else:
+            self.output.append("\n\n[提示] 本章未生成有效内容")
+            if self._batch_mode:
+                self._advance_batch(success=False)
     def _on_error(self, msg):
         self.btn_stop.setEnabled(False)
         self.output.append(f"\n\n[错误] {msg}")
 
+        if self._writing_chapter_id is not None:
+            self._writing_chapter_id = None
+            if self._batch_mode:
+                self._advance_batch(success=False)
     def _on_summary_done(self, result_text):
         self.btn_stop.setEnabled(False)
         # 在主线程中保存到数据库
@@ -346,8 +352,8 @@ class AIDialog(QWidget):
         # 批量模式下停止整个队列
         if self._batch_mode:
             self._batch_queue.clear()
-            self._finish_batch()
-
+            self._writing_chapter_id = None
+            self._finish_batch(stopped=True)
     def _insert_to_editor(self):
         text = self.output.toPlainText().strip()
         if text:
@@ -631,6 +637,7 @@ class AIDialog(QWidget):
         self._batch_queue = selected_ids
         self._batch_total = len(selected_ids)
         self._batch_done = 0
+        self._batch_failed = 0
         self._batch_mode = True
         self.batch_progress.setMaximum(self._batch_total)
         self.batch_progress.setValue(0)
@@ -647,12 +654,31 @@ class AIDialog(QWidget):
         if not self._batch_queue:
             self._finish_batch()
             return
+
         chapter_id = self._batch_queue.pop(0)
         chapter = self.project.db.get_chapter(chapter_id)
         if chapter:
             self._start_write_chapter(chapter)
+        else:
+            self.output.append(f"\n\n[错误] 章节不存在（ID: {chapter_id}）")
+            self._advance_batch(success=False)
 
-    def _finish_batch(self):
+    def _advance_batch(self, success=True):
+        self._batch_done += 1
+        if not success:
+            self._batch_failed += 1
+
+        self.batch_progress.setValue(self._batch_done)
+        self.batch_label.setText(
+            f"进度: {self._batch_done}/{self._batch_total}（失败: {self._batch_failed}）"
+        )
+
+        if self._batch_queue:
+            QTimer.singleShot(800, self._write_next_in_batch)
+        else:
+            self._finish_batch()
+
+    def _finish_batch(self, stopped=False):
         self._batch_mode = False
         self._batch_queue.clear()
         self.batch_progress.setVisible(False)
@@ -660,8 +686,16 @@ class AIDialog(QWidget):
         self.btn_batch.setEnabled(True)
         self.btn_write_ch1.setEnabled(True)
         self.btn_outline.setEnabled(True)
-        self.output.append(f"\n\n=== 批量生成完成 ({self._batch_done}/{self._batch_total}) ===")
 
+        ok_count = max(0, self._batch_done - self._batch_failed)
+        if stopped:
+            self.output.append(
+                f"\n\n=== 批量生成已停止（完成: {self._batch_done}/{self._batch_total}，成功: {ok_count}，失败: {self._batch_failed}） ==="
+            )
+        else:
+            self.output.append(
+                f"\n\n=== 批量生成完成（完成: {self._batch_done}/{self._batch_total}，成功: {ok_count}，失败: {self._batch_failed}） ==="
+            )
     # ── 对话模式 ──
     def set_chat_chapter_id(self, chapter_id):
         self._chat_chapter_id = chapter_id
@@ -729,3 +763,5 @@ class AIDialog(QWidget):
         self._chat_history.clear()
         self._chat_accumulated = ""
         self.chat_display.clear()
+
+
