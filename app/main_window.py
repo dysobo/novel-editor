@@ -267,11 +267,19 @@ class MainWindow(QMainWindow):
 
     def _show_usage_guide(self):
         QMessageBox.information(self, "使用说明",
-            "1. 在 AI 设置中配置 API 密钥\n"
-            "2. 新建或打开项目\n"
-            "3. 编写角色设定和世界观\n"
-            "4. 生成或编写大纲\n"
-            "5. 逐章撰写，可使用 AI 续写/润色辅助")
+            "【1. 配置 AI（推荐 DeepSeek）】\n"
+            "打开 AI → 设置，按下列内容填写：\n"
+            "- API Key: 你的 DeepSeek Key（如 sk-xxxx）\n"
+            "- Base URL: https://api.deepseek.com/v1\n"
+            "- Model: deepseek-chat\n\n"
+            "【2. 验证配置是否成功】\n"
+            "切到 AI 对话模式，发送“你好”测试；有回复即配置成功。\n\n"
+            "【3. 开始写作流程】\n"
+            "新建/打开项目 → 维护角色与世界观 → 生成大纲 → 写章节。\n\n"
+            "【4. 常见问题】\n"
+            "- 提示未配置 AI：请先保存设置\n"
+            "- 401/鉴权失败：检查 API Key 是否正确\n"
+            "- 无法连接：检查 Base URL 与网络")
 
     def _open_homepage(self):
         QDesktopServices.openUrl(QUrl("https://github.com/dysobo/novel-editor"))

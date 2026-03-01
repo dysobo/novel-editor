@@ -4,7 +4,7 @@
 
 ![软件界面](resources/images/screenshot.png)
 
-## 最新版本：v1.3
+## 最新版本：v1.3.1
 
 ## 功能
 
@@ -43,14 +43,57 @@
 ## 快速开始
 
 ```bash
-# 安装依赖
+# 1) 安装依赖
 pip install -r requirements.txt
 
-# 启动
+# 2) 启动
 python main.py
 ```
 
-首次使用：点击右侧 **AI → 设置**，配置 API Key、Base URL 和模型名称。
+## 使用说明（详细步骤）
+
+### 第一步：首次启动
+1. 启动软件后，先点击 **文件 → 新建项目**（或打开已有 `.novel`）。
+2. 建议先创建基础结构：卷、章节、角色、世界观。
+3. 再进入右侧 **AI 助手** 页面进行 AI 配置。
+
+### 第二步：配置 AI（推荐 DeepSeek）
+1. 在软件中点击 **AI → AI 设置**。
+2. 按如下推荐值填写：
+   - `API Key`：你的 DeepSeek API Key（示例格式：`sk-xxxx`）
+   - `Base URL`：`https://api.deepseek.com/v1`
+   - `Model`：`deepseek-chat`
+3. 点击 **保存**。
+
+### 第三步：验证配置是否成功
+1. 进入右侧 **AI 助手 → 对话模式**。
+2. 输入一句测试文本（例如：`你好，请用一句话介绍你能做什么`）。
+3. 如果 AI 正常回复，说明配置完成。
+
+### 第四步：开始写作（推荐流程）
+1. 在左侧章节树建立卷和章节。
+2. 在“角色管理/世界观”里补充设定。
+3. 在 AI 助手中使用“生成大纲”生成卷章结构。
+4. 用“写章节”或“批量写章节”生成正文。
+5. 在编辑器中继续手写，并用“AI 续写/润色/摘要”辅助。
+
+### 常见配置（可直接照填）
+
+#### DeepSeek（推荐）
+- `API Key`：你的 DeepSeek Key
+- `Base URL`：`https://api.deepseek.com/v1`
+- `Model`：`deepseek-chat`
+
+#### OpenAI（可选）
+- `API Key`：你的 OpenAI Key
+- `Base URL`：`https://api.openai.com/v1`
+- `Model`：`gpt-4o`（或你可用的模型）
+
+### 常见问题排查
+- 提示“请先配置 AI”：确认已在设置页点击 **保存**。
+- 401 / 鉴权错误：API Key 填写错误或已失效。
+- 404 / 模型不存在：模型名不正确，检查 `Model` 字段。
+- 连接超时：检查网络，确认 `Base URL` 无拼写错误。
 
 ## 技术栈
 
